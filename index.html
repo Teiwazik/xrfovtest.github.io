@@ -1,117 +1,89 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>WebXR Dynamic FOV Demo (Quest 3)</title>
+  <meta charset="UTF-8">
+  <title>Babylon.js WebXR FOV Control (Quest 3)</title>
   <style>
-    body { margin: 0; overflow: hidden; background: #000; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; }
     #ui {
       position: absolute; top: 10px; left: 10px;
-      background: rgba(0,0,0,0.6); color: #fff;
-      font-family: monospace; padding: 8px 12px;
-      border-radius: 10px;
+      color: #fff; font-family: monospace; background: rgba(0,0,0,0.5);
+      padding: 8px 12px; border-radius: 10px;
     }
   </style>
 </head>
 <body>
-  <div id="ui">Use Quest joystick ↑↓ or Arrow keys — FOV: <span id="fovVal">90</span>°</div>
+  <div id="ui">🎮 Use Quest joystick ↑↓ — FOV: <span id="fovVal">90</span>°</div>
+  <canvas id="renderCanvas"></canvas>
 
   <script type="module">
-    import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js";
-    import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/webxr/VRButton.js";
+    import * as BABYLON from "https://cdn.jsdelivr.net/npm/babylonjs@7.50.0/+esm";
 
-    // Scene setup
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x101020);
+    const canvas = document.getElementById("renderCanvas");
+    const engine = new BABYLON.Engine(canvas, true);
+    const scene = new BABYLON.Scene(engine);
 
-    const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 2); // VR head height
+    // Simple environment
+    const camera = new BABYLON.UniversalCamera("cam", new BABYLON.Vector3(0, 1.6, -3), scene);
+    camera.attachControl(canvas, true);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
-    document.body.appendChild(VRButton.createButton(renderer));
+    const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
+    light.intensity = 1.2;
 
-    // Lighting & objects
-    const light = new THREE.HemisphereLight(0xffffff, 0x222233, 1.2);
-    scene.add(light);
+    const box = BABYLON.MeshBuilder.CreateBox("box", { size: 1 }, scene);
+    box.position.y = 1;
 
-    const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
-    const cubeMat = new THREE.MeshStandardMaterial({ color: 0x33ccaa });
-    const cube = new THREE.Mesh(cubeGeo, cubeMat);
-    scene.add(cube);
+    const ground = BABYLON.MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, scene);
 
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 10),
-      new THREE.MeshStandardMaterial({ color: 0x222222 })
-    );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
+    // WebXR setup
+    const xr = await scene.createDefaultXRExperienceAsync({
+      floorMeshes: [ground]
+    });
 
-    // FOV control variables
-    let fov = 90;
+    // FOV logic
+    let fov = BABYLON.Tools.ToRadians(90);
     let targetFOV = fov;
-    const minFOV = 60;
-    const maxFOV = 130;
+    const minFOV = BABYLON.Tools.ToRadians(60);
+    const maxFOV = BABYLON.Tools.ToRadians(130);
     const fovDisplay = document.getElementById("fovVal");
 
     function updateFOV(delta) {
-      targetFOV = THREE.MathUtils.clamp(targetFOV + delta, minFOV, maxFOV);
-      fovDisplay.textContent = targetFOV.toFixed(0);
+      targetFOV = BABYLON.Scalar.Clamp(targetFOV + BABYLON.Tools.ToRadians(delta), minFOV, maxFOV);
+      fovDisplay.textContent = BABYLON.Tools.ToDegrees(targetFOV).toFixed(0);
     }
+
+    // Device Source Manager (handles Quest controllers, keyboard, etc)
+    const dsm = new BABYLON.DeviceSourceManager(engine);
 
     // Keyboard fallback
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowUp') updateFOV(-2);
-      if (e.key === 'ArrowDown') updateFOV(2);
-    });
-
-    // VR controller handling
-    function handleControllers() {
-      const session = renderer.xr.getSession();
-      if (!session) return;
-
-      for (const source of session.inputSources) {
-        if (!source.gamepad) continue;
-
-        const gp = source.gamepad;
-        const axes = gp.axes;
-        let vertical = 0;
-
-        // Try right stick vertical (axes[3]) or fallback to left stick (axes[1])
-        if (axes.length >= 4) vertical = axes[3];
-        else if (axes.length >= 2) vertical = axes[1];
-
-        // Only apply if stick is moved significantly
-        if (Math.abs(vertical) > 0.2) {
-          updateFOV(vertical * 2.0);
-        }
+    scene.onKeyboardObservable.add((kb) => {
+      if (kb.type === BABYLON.KeyboardEventTypes.KEYDOWN) {
+        if (kb.event.key === "ArrowUp") updateFOV(-2);
+        if (kb.event.key === "ArrowDown") updateFOV(2);
       }
-    }
-
-    // Animation loop
-    renderer.setAnimationLoop(() => {
-      handleControllers();
-
-      // Smoothly interpolate FOV to prevent motion sickness
-      fov = THREE.MathUtils.lerp(fov, targetFOV, 0.1);
-      camera.fov = fov;
-      camera.updateProjectionMatrix();
-
-      // Animate cube
-      cube.rotation.y += 0.01;
-      cube.rotation.x += 0.005;
-
-      renderer.render(scene, camera);
     });
 
-    // Handle resize
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+    // Each frame, poll controllers
+    scene.onBeforeRenderObservable.add(() => {
+      // Check all registered devices (Quest controllers show as "Generic")
+      const generic = dsm.getDeviceSource(BABYLON.DeviceType.Generic, 0);
+      const genericR = dsm.getDeviceSource(BABYLON.DeviceType.Generic, 1);
+
+      let vertical = 0;
+      if (generic && generic.getInput(3) !== undefined) vertical = generic.getInput(3); // right stick Y
+      if (genericR && Math.abs(genericR.getInput(3)) > Math.abs(vertical))
+        vertical = genericR.getInput(3);
+
+      if (Math.abs(vertical) > 0.2) updateFOV(vertical * 1.5);
+
+      // Smoothly adjust camera FOV
+      fov = BABYLON.Scalar.Lerp(fov, targetFOV, 0.1);
+      xr.baseExperience.camera.fov = fov;
     });
+
+    // Render loop
+    engine.runRenderLoop(() => scene.render());
+    window.addEventListener("resize", () => engine.resize());
   </script>
 </body>
 </html>
