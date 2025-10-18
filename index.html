@@ -2,28 +2,30 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WebXR Dynamic FOV Demo</title>
+  <title>WebXR Dynamic FOV Demo (Quest 3)</title>
   <style>
     body { margin: 0; overflow: hidden; background: #000; }
     #ui {
       position: absolute; top: 10px; left: 10px;
-      background: rgba(0,0,0,0.5); color: #fff;
-      font-family: sans-serif; padding: 10px; border-radius: 10px;
+      background: rgba(0,0,0,0.6); color: #fff;
+      font-family: monospace; padding: 8px 12px;
+      border-radius: 10px;
     }
   </style>
 </head>
 <body>
-  <div id="ui">Use arrow keys or Quest controller joystick to change FOV</div>
+  <div id="ui">Use Quest joystick ↑↓ or Arrow keys — FOV: <span id="fovVal">90</span>°</div>
+
   <script type="module">
     import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js";
     import { VRButton } from "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/webxr/VRButton.js";
 
-    // Scene, camera, renderer setup
+    // Scene setup
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x101020);
 
     const camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.set(0, 1.6, 2); // typical human height in VR
+    camera.position.set(0, 1.6, 2); // VR head height
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -31,65 +33,80 @@
     document.body.appendChild(renderer.domElement);
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Basic environment
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshStandardMaterial({ color: 0x44aa88 });
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
-
-    const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+    // Lighting & objects
+    const light = new THREE.HemisphereLight(0xffffff, 0x222233, 1.2);
     scene.add(light);
 
-    // Ground
-    const plane = new THREE.Mesh(
-      new THREE.PlaneGeometry(10, 10),
-      new THREE.MeshStandardMaterial({ color: 0x333333 })
-    );
-    plane.rotation.x = -Math.PI / 2;
-    scene.add(plane);
+    const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
+    const cubeMat = new THREE.MeshStandardMaterial({ color: 0x33ccaa });
+    const cube = new THREE.Mesh(cubeGeo, cubeMat);
+    scene.add(cube);
 
-    // FOV logic
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(10, 10),
+      new THREE.MeshStandardMaterial({ color: 0x222222 })
+    );
+    floor.rotation.x = -Math.PI / 2;
+    scene.add(floor);
+
+    // FOV control variables
     let fov = 90;
+    let targetFOV = fov;
     const minFOV = 60;
     const maxFOV = 130;
-    let targetFOV = fov;
+    const fovDisplay = document.getElementById("fovVal");
 
     function updateFOV(delta) {
       targetFOV = THREE.MathUtils.clamp(targetFOV + delta, minFOV, maxFOV);
+      fovDisplay.textContent = targetFOV.toFixed(0);
     }
 
-    // Keyboard input
+    // Keyboard fallback
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowUp') updateFOV(-2);
       if (e.key === 'ArrowDown') updateFOV(2);
     });
 
-    // Controller (Quest joystick)
+    // VR controller handling
     function handleControllers() {
       const session = renderer.xr.getSession();
       if (!session) return;
+
       for (const source of session.inputSources) {
-        if (source.gamepad) {
-          const [x, y] = source.gamepad.axes;
-          if (Math.abs(y) > 0.2) updateFOV(y * 1.5); // use up/down joystick
+        if (!source.gamepad) continue;
+
+        const gp = source.gamepad;
+        const axes = gp.axes;
+        let vertical = 0;
+
+        // Try right stick vertical (axes[3]) or fallback to left stick (axes[1])
+        if (axes.length >= 4) vertical = axes[3];
+        else if (axes.length >= 2) vertical = axes[1];
+
+        // Only apply if stick is moved significantly
+        if (Math.abs(vertical) > 0.2) {
+          updateFOV(vertical * 2.0);
         }
       }
     }
 
     // Animation loop
     renderer.setAnimationLoop(() => {
-      // Smooth transition to avoid motion sickness
+      handleControllers();
+
+      // Smoothly interpolate FOV to prevent motion sickness
       fov = THREE.MathUtils.lerp(fov, targetFOV, 0.1);
       camera.fov = fov;
       camera.updateProjectionMatrix();
 
+      // Animate cube
       cube.rotation.y += 0.01;
       cube.rotation.x += 0.005;
 
-      handleControllers();
       renderer.render(scene, camera);
     });
 
+    // Handle resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
